@@ -43,12 +43,22 @@ import
 	Debounce
 } from './common.js';
 
-export let gSettings = {};
+let gSettings = {};
+let gAltSettings = [null, null];
 export let gSpName = "Default";
+const kNotUsedPreset = "<Not Used>";
 
-export function GetCurrentSettings()
+export function GetCurrentSettings(index)
 {
+	if (Number.isInteger(index) && index >= 1)
+		return gAltSettings[index - 1] ?? gSettings;
+
 	return gSettings;
+}
+
+export function IsAlternativeSettingsUsed(index)
+{
+	return Number.isInteger(index) && index >= 1 && gAltSettings[index - 1] != null;
 }
 
 export function GetCurrentSettingsName()
@@ -60,15 +70,38 @@ export function GetCurrentSettingsName()
 // Settings Main
 // =========================
 
-export async function LoadSettings(stContext)
+export async function LoadSettings(stContext, index)
 {
 	// Get or Initialise root settings
 	stContext.extensionSettings[kExtensionName] ??= {};
 	let rootSettings = stContext.extensionSettings[kExtensionName];
 
 	// Get Settings name
-	let settingPresetName = rootSettings.spName ?? "Default";
-	rootSettings.spName = settingPresetName;
+	const isAlternative = Number.isInteger(index) && index >= 1;
+	rootSettings.altSpNames ??= [null, null];
+	let settingPresetName = isAlternative ? rootSettings.altSpNames[index - 1] : rootSettings.spName;
+	if (!settingPresetName || settingPresetName === kNotUsedPreset)
+	{
+		if (isAlternative)
+			gAltSettings[index - 1] = null;
+		else
+			settingPresetName = "Default";
+
+		if (!isAlternative)
+			rootSettings.spName = settingPresetName;
+
+		if (isAlternative)
+			return [gSettings, gSpName];
+	}
+	if (isAlternative && settingPresetName !== "Default" && !rootSettings.spData?.[settingPresetName])
+	{
+		rootSettings.altSpNames[index - 1] = null;
+		gAltSettings[index - 1] = null;
+		return [gSettings, gSpName];
+	}
+
+	if (!isAlternative)
+		rootSettings.spName = settingPresetName;
 
 	let activeSettings = rootSettings;
 
@@ -98,8 +131,16 @@ export async function LoadSettings(stContext)
 		}
 	}
 
-	gSettings = activeSettings;
-	gSpName = settingPresetName;
+	if (isAlternative)
+	{
+		gAltSettings[index - 1] = activeSettings;
+	}
+	else
+	{
+		gSettings = activeSettings;
+	}
+	if (!isAlternative)
+		gSpName = settingPresetName;
 
 	return [gSettings, gSpName];
 }
@@ -130,7 +171,7 @@ export async function SwapProfile(profileName)
 	UpdateSettingsUI();
 }
 
-export function OnSettingChanged(event)
+export async function OnSettingChanged(event)
 {
 	const stContext = SillyTavern.getContext();
 	const id = event.target.id;
@@ -140,6 +181,18 @@ export function OnSettingChanged(event)
 	{
 		case "ils_setting_sp_combo":
 			SwapProfile(val);
+			break;
+		case "ils_setting_alt_sp_combo_1":
+		case "ils_setting_alt_sp_combo_2":
+			{
+				const index = id.endsWith("_1") ? 1 : 2;
+				stContext.extensionSettings[kExtensionName] ??= {};
+				const rootSettings = stContext.extensionSettings[kExtensionName];
+				rootSettings.altSpNames ??= [null, null];
+				rootSettings.altSpNames[index - 1] = val === kNotUsedPreset ? null : val;
+				await LoadSettings(stContext, index);
+				document.dispatchEvent(new Event("ils-settings-changed"));
+			}
 			break;
 		case "ils_setting_hist_ctx_depth":
 			{
@@ -275,9 +328,19 @@ export async function OnSettingSpDelete()
 
 	// Delete old preset
 	delete rootSettings.spData[spName];
+	rootSettings.altSpNames ??= [null, null];
+	for (let index = 0; index < rootSettings.altSpNames.length; ++index)
+	{
+		if (rootSettings.altSpNames[index] === spName)
+		{
+			rootSettings.altSpNames[index] = null;
+			gAltSettings[index] = null;
+		}
+	}
 
 	// Refresh
 	stContext.saveSettingsDebounced();
+	document.dispatchEvent(new Event("ils-settings-changed"));
 	UpdateSettingsUI();
 }
 
@@ -409,6 +472,18 @@ export async function UpdateSettingsUI()
 			spDropdown.append($('<option>', { value: custompreset, text: custompreset }));
 		}
 		spDropdown.val(gSpName);
+
+		rootSettings.altSpNames ??= [null, null];
+		for (let index = 1; index <= 2; ++index)
+		{
+			const altDropdown = $(`#ils_setting_alt_sp_combo_${index}`);
+			altDropdown.empty();
+			altDropdown.append($('<option>', { value: kNotUsedPreset, text: kNotUsedPreset }));
+			altDropdown.append($('<option>', { value: 'Default', text: 'Default' }));
+			for (const [custompreset] of Object.entries(rootSettings.spData))
+				altDropdown.append($('<option>', { value: custompreset, text: custompreset }));
+			altDropdown.val(rootSettings.altSpNames[index - 1] ?? kNotUsedPreset);
+		}
 	}
 
 	// Check for Regex extension
@@ -560,6 +635,8 @@ export function SetupOnSettingChangeEvents()
 {
 	// Setup setting change handlers
 	$("#ils_setting_sp_combo").on("input", OnSettingChanged);
+	$("#ils_setting_alt_sp_combo_1").on("change", OnSettingChanged);
+	$("#ils_setting_alt_sp_combo_2").on("change", OnSettingChanged);
 	$("#ils_setting_hist_ctx_depth").on("input", OnSettingChanged);
 	$("#ils_setting_hist_ctx_start").on("input", Debounce(OnSettingChanged, 500));
 	$("#ils_setting_hist_ctx_end").on("input", Debounce(OnSettingChanged, 500));

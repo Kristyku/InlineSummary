@@ -13,10 +13,15 @@ The original messages are stored away and hidden, but can be restored at any tim
 Select a **Start** and an **End** message using the two Message Action buttons.<br>
 ![Message buttons](images/usage1.png)<br>
 ![Message buttons - start selected](images/usage2.png)<br>
-Then the options for **AI Summary** , **Manual Summary**, and **Clear Range** will appear.<br>
+Then the options for **AI Summary**, **Manual Summary**, and **Clear Range** will appear.<br>
 ![Message buttons - start and end selected](images/usage3.png)<br>
 Click the **AI Summary** button and wait for the AI to finish generating.<br>
 Alternatively click the **Manual Summary** button, then edit the inserted message and write a manual summary.<br>
+
+#### Alternative Presets
+The **Alternative Presets** settings provide two optional preset slots. Choose a saved setting preset for **Alternative 1** or **Alternative 2**, or leave either slot as **`<Not Used>`**.<br>
+When an alternative is configured, an additional colored AI Summary button appears alongside the normal button. The corresponding alternative button uses that slot's settings without changing the main settings. Alternative 1 is teal and Alternative 2 is light purple.<br>
+Alternative regenerate buttons are also available on existing summary messages.<br>
 
 #### Existing Summary
 Summary messages will contain an expandable header which contains the original messages. Click anywhere on the header (except the buttons) to expand it.<br>
@@ -62,6 +67,7 @@ Settings in the Extension settings menu:
 | Setting | Meaning |
 | :--- | :--- |
 | Setting Presets | Saved setting presets for the extension  |
+| Alternative Presets | Select up to two saved setting presets for the optional Alternative 1 and Alternative 2 summary and regenerate buttons. `<Not Used>` disables the corresponding alternative. |
 | Summary Prompt Start | Prompt text inserted at the start of the summary generation prompt |
 | Historical Context Size | Number of messages to include in the summary generation prompt. -1 for auto (it will try to fit as many as it can to fill the allowed context window. 0 for none) |
 | Historical Context Start Marker | Marker that indicates the start of the historical context |
@@ -117,18 +123,15 @@ This specific style hides the Message Actions buttons from older messages, which
 
 ## Changelog
 
+#### v1.2.3
+Added two optional alternative preset slots. Each configured slot adds its own AI Summary and Re-Summarise buttons, allowing summaries to be generated with different extension settings without changing the main preset.<br>
+AI and manual summaries can now be created from a single selected message by selecting the same message as both the start and end.<br>
+
 #### v1.2.2
 Added event hooks for selection, summary creation, and restore actions so other extensions can respond to the summary workflow.
 
 #### v1.2.1
 Added an option to use multiple messages as the summary prompt. This should make the prompt respect the "Character Names Behavior" setting.
-
-#### v1.2.0
-Fixed original message data being duplicated in the saved chat files leading to file size bloat. A recovery step will run when loading old chats to remove duplicates and move data where it won't get duplicated (can be disabled in options).<br>
-Added some error checking to improve rare but critical scenarios where SillyTavern might fail saving chat.
-
-#### v1.1.9
-Streaming support for Text Completion API. It uses the setting from the preset and will allow larger reply sizes for certain LLM providers.
 
 ### Previous Changes
 See `changelog.md`

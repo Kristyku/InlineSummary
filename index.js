@@ -6,6 +6,8 @@
 const kMsgBtnColours = {
 	default: null,
 	selected: "#4CAF50",
+	alt1: "#54e0d9",
+	alt2: "#ecc7ec",
 	between: "#FFEB3B",
 	clearable: "#2196F3",
 };
@@ -49,7 +51,8 @@ import
 
 import
 {
-	gSettings,
+	GetCurrentSettings,
+	IsAlternativeSettingsUsed,
 	LoadSettings,
 	UpdateSettingsUI,
 	SetupOnSettingChangeEvents
@@ -132,7 +135,7 @@ function IsValidRangeSelection(selection)
 {
 	return selection.start !== null
 		&& selection.end !== null
-		&& (selection.end - selection.start) >= 1;
+		&& (selection.end - selection.start) >= 0;
 }
 
 // =========================
@@ -180,7 +183,7 @@ function HasOriginalMessages(msgObject)
 	return msgObject && msgObject[kExtraDataKey] && Array.isArray(msgObject[kExtraDataKey][kOriginalMessagesKey]);
 }
 
-async function CreateEmptySummaryMessage(originalMessages, stContext)
+async function CreateEmptySummaryMessage(originalMessages, stContext, ilsSettings)
 {
 	const summary = {
 		is_user: false,
@@ -189,7 +192,7 @@ async function CreateEmptySummaryMessage(originalMessages, stContext)
 		extra: {}
 	};
 
-	switch (gSettings.summaryNameMode)
+	switch (ilsSettings.summaryNameMode)
 	{
 		case "user":
 			summary.name = stContext.name1;
@@ -200,7 +203,7 @@ async function CreateEmptySummaryMessage(originalMessages, stContext)
 			break;
 		case "custom":
 		default:
-			summary.name = gSettings.summaryName;
+			summary.name = ilsSettings.summaryName;
 			break;
 	}
 
@@ -212,9 +215,9 @@ async function CreateEmptySummaryMessage(originalMessages, stContext)
 	return summary;
 }
 
-async function BringIntoView(msgIndex)
+async function BringIntoView(msgIndex, ilsSettings)
 {
-	if (!gSettings.autoScroll)
+	if (!ilsSettings.autoScroll)
 		return;
 
 	// Still need sleep since 'chat-scrollto' is not 100% reliable
@@ -228,13 +231,13 @@ async function BringIntoView(msgIndex)
 // Generation Functions
 // =========================
 
-async function SwapToSummaryProfile(stContext, ilsInstance)
+async function SwapToSummaryProfile(stContext, ilsInstance, ilsSettings)
 {
 	const apiMode = stContext.mainApi?.toLowerCase();
-	const presetName = gSettings?.apiPresets?.[apiMode] ?? "";
+	const presetName = ilsSettings?.apiPresets?.[apiMode] ?? "";
 
-	let useDifferentProfile = gSettings.useDifferentProfile && gSettings.profileName !== "" && gSettings.profileName !== "<None>" && ilsInstance.connProfEnabled;
-	let useDifferentApiPreset = gSettings.useDifferentApiPreset && presetName !== "" && ilsInstance.connProfEnabled;
+	let useDifferentProfile = ilsSettings.useDifferentProfile && ilsSettings.profileName !== "" && ilsSettings.profileName !== "<None>" && ilsInstance.connProfEnabled;
+	let useDifferentApiPreset = ilsSettings.useDifferentApiPreset && presetName !== "" && ilsInstance.connProfEnabled;
 
 	let success = true;
 
@@ -244,11 +247,11 @@ async function SwapToSummaryProfile(stContext, ilsInstance)
 	{
 		prevProfile = (await stContext.executeSlashCommandsWithOptions("/profile")).pipe;
 
-		const swapResult = await stContext.executeSlashCommandsWithOptions("/profile " + gSettings.profileName);
+		const swapResult = await stContext.executeSlashCommandsWithOptions("/profile " + ilsSettings.profileName);
 		stContext = SillyTavern.getContext(); // Update context just in case
 		if (swapResult.isError)
 		{
-			ShowError("Failed to swap connection profile to:\n" + gSettings.profileName + "\nGeneration Aborted.");
+			ShowError("Failed to swap connection profile to:\n" + ilsSettings.profileName + "\nGeneration Aborted.");
 			success = false;
 		}
 	}
@@ -270,14 +273,14 @@ async function SwapToSummaryProfile(stContext, ilsInstance)
 	return { success, useDifferentProfile, prevProfile, useDifferentApiPreset, prevPreset };
 }
 
-async function SwapBackFromSummaryProfile(stContext, profileSwap)
+async function SwapBackFromSummaryProfile(stContext, profileSwap, ilsSettings)
 {
 	if (profileSwap.useDifferentProfile)
 	{
 		const swapResult = await stContext.executeSlashCommandsWithOptions("/profile " + profileSwap.prevProfile);
 		if (swapResult.isError)
 		{
-			ShowError("Failed to restore connection profile to:\n" + gSettings.profileName + "\nPlease check the profile manually.");
+			ShowError("Failed to restore connection profile to:\n" + ilsSettings.profileName + "\nPlease check the profile manually.");
 		}
 	}
 
@@ -286,15 +289,15 @@ async function SwapBackFromSummaryProfile(stContext, profileSwap)
 		const swapResult = await stContext.executeSlashCommandsWithOptions("/preset " + profileSwap.prevPreset);
 		if (swapResult.isError)
 		{
-			ShowError("Failed to restore preset to:\n" + gSettings.profileName + "\nPlease check the preset manually.");
+			ShowError("Failed to restore preset to:\n" + ilsSettings.profileName + "\nPlease check the preset manually.");
 		}
 	}
 }
 
-async function PopulateSummaryMessage(stContext, summaryMsg, msgText, msgReasoning)
+async function PopulateSummaryMessage(stContext, summaryMsg, msgText, msgReasoning, ilsSettings)
 {
 	const ilsInstance = GetILSInstance();
-	const runRegex = (ilsInstance.regexEnabled && gSettings.regexPostGenerate);
+	const runRegex = (ilsInstance.regexEnabled && ilsSettings.regexPostGenerate);
 
 	if (msgText != null)
 		summaryMsg.mes = runRegex ? getRegexedString(msgText, regex_placement.AI_OUTPUT, { isPrompt: false, isEdit: true, depth: 0 }) : msgText;
@@ -308,7 +311,7 @@ async function PopulateSummaryMessage(stContext, summaryMsg, msgText, msgReasoni
 	summaryMsg.extra.token_count = await stContext.getTokenCountAsync(summaryMsg.mes);
 }
 
-async function GenerateSummaryAI()
+async function GenerateSummaryAI(ilsSettings = GetCurrentSettings())
 {
 	let stContext = SillyTavern.getContext();
 	const selection = GetSelection(stContext);
@@ -323,7 +326,7 @@ async function GenerateSummaryAI()
 	stContext.deactivateSendButtons();
 
 	// Swap Profile
-	const profileSwap = await SwapToSummaryProfile(stContext, ilsInstance);
+	const profileSwap = await SwapToSummaryProfile(stContext, ilsInstance, ilsSettings);
 
 	if (!profileSwap.success)
 	{
@@ -334,7 +337,7 @@ async function GenerateSummaryAI()
 
 	// Prepare original messages and prompt
 	const originalMessages = stContext.chat.slice(selection.start, selection.end + 1);
-	const { promptOk, promptMsg, promptError } = await MakeSummaryPrompt(selection.start, stContext.chat.length - (selection.end + 1), originalMessages, stContext, gSettings);
+	const { promptOk, promptMsg, promptError } = await MakeSummaryPrompt(selection.start, stContext.chat.length - (selection.end + 1), originalMessages, stContext, ilsSettings);
 
 	if (!promptOk)
 	{
@@ -345,10 +348,10 @@ async function GenerateSummaryAI()
 	}
 
 	// Start LLM generation asynchronously without awaiting yet
-	let genStart = await StartGenerate(stContext, promptMsg, gSettings.tokenLimit);
+	let genStart = await StartGenerate(stContext, promptMsg, ilsSettings.tokenLimit);
 
 	// create empty summary message while generation runs
-	const newSummaryMsg = await CreateEmptySummaryMessage(originalMessages, stContext);
+	const newSummaryMsg = await CreateEmptySummaryMessage(originalMessages, stContext, ilsSettings);
 
 	// Delete Originals
 	stContext.chat.splice(selection.start, originalMessages.length);
@@ -359,7 +362,7 @@ async function GenerateSummaryAI()
 	if (!chatReload1)
 	{
 		await FinishGenerate(stContext, genStart);
-		await SwapBackFromSummaryProfile(stContext, profileSwap);
+		await SwapBackFromSummaryProfile(stContext, profileSwap, ilsSettings);
 
 		stContext.activateSendButtons();
 		ilsInstance.operationLock = false;
@@ -367,7 +370,7 @@ async function GenerateSummaryAI()
 		return false;
 	}
 
-	await BringIntoView(selection.start);
+	await BringIntoView(selection.start, ilsSettings);
 
 	// Find and update the HTML element for the summary message with a loading spinner
 	{
@@ -389,7 +392,7 @@ async function GenerateSummaryAI()
 	// Now await for the LLM response to complete
 	let genResponse = await FinishGenerate(stContext, genStart);
 
-	await PopulateSummaryMessage(stContext, stContext.chat[selection.start], genResponse.mainMsg, genResponse.reasoning);
+	await PopulateSummaryMessage(stContext, stContext.chat[selection.start], genResponse.mainMsg, genResponse.reasoning, ilsSettings);
 
 	await stContext.eventSource.emit("ILS_SummaryAdded", { msgIndex: selection.start, originalMessages: originalMessages, isManual: false, isRegenerate: false });
 
@@ -398,13 +401,13 @@ async function GenerateSummaryAI()
 	// Save and reload to reflect the final response in the UI
 	const chatReload2 = await SaveAndReloadChat(stContext, "Failed to Save and Reload chat. Summary could not be saved. Refreshing the page is recommended.");
 
-	await SwapBackFromSummaryProfile(stContext, profileSwap);
+	await SwapBackFromSummaryProfile(stContext, profileSwap, ilsSettings);
 
 	stContext.activateSendButtons();
 	ilsInstance.operationLock = false;
 
 	if (chatReload2)
-		BringIntoView(selection.start);
+		BringIntoView(selection.start, ilsSettings);
 
 	return genResponse.isOk && chatReload2;
 }
@@ -412,6 +415,7 @@ async function GenerateSummaryAI()
 async function GenerateSummaryManual()
 {
 	const stContext = SillyTavern.getContext();
+	const ilsSettings = GetCurrentSettings();
 	const selection = GetSelection(stContext);
 	if (!IsValidRangeSelection(selection))
 		return false;
@@ -425,7 +429,7 @@ async function GenerateSummaryManual()
 	// Prepare original messages and prompt
 	const originalMessages = stContext.chat.slice(selection.start, selection.end + 1);
 
-	const newSummaryMsg = await CreateEmptySummaryMessage(originalMessages, stContext);
+	const newSummaryMsg = await CreateEmptySummaryMessage(originalMessages, stContext, ilsSettings);
 	newSummaryMsg.mes = "_Manual Summary_\n_Edit and replace this message with a summary_";
 	newSummaryMsg.send_date = getMessageTimeStamp();
 	newSummaryMsg.extra.api = "custom";
@@ -444,13 +448,13 @@ async function GenerateSummaryManual()
 	const chatReload = await SaveAndReloadChat(stContext, "Failed to Save and Reload chat. Summary could not be saved. Refreshing the page is recommended.");
 
 	if (chatReload)
-		BringIntoView(selection.start);
+		BringIntoView(selection.start, ilsSettings);
 	ilsInstance.operationLock = false;
 
 	return chatReload;
 }
 
-async function RegenerateSummary(msgIndex)
+async function RegenerateSummary(msgIndex, ilsSettings = GetCurrentSettings())
 {
 	let stContext = SillyTavern.getContext();
 
@@ -466,7 +470,7 @@ async function RegenerateSummary(msgIndex)
 	stContext.deactivateSendButtons();
 
 	// Swap Profile
-	const profileSwap = await SwapToSummaryProfile(stContext, ilsInstance);
+	const profileSwap = await SwapToSummaryProfile(stContext, ilsInstance, ilsSettings);
 
 	if (!profileSwap.success)
 	{
@@ -476,7 +480,7 @@ async function RegenerateSummary(msgIndex)
 	}
 
 	const originalMessages = summaryMsg[kExtraDataKey][kOriginalMessagesKey];
-	const { promptOk, promptMsg, promptError } = await MakeSummaryPrompt(msgIndex, stContext.chat.length - (msgIndex + 1), originalMessages, stContext, gSettings);
+	const { promptOk, promptMsg, promptError } = await MakeSummaryPrompt(msgIndex, stContext.chat.length - (msgIndex + 1), originalMessages, stContext, ilsSettings);
 
 	if (!promptOk)
 	{
@@ -487,7 +491,7 @@ async function RegenerateSummary(msgIndex)
 	}
 
 	// Start LLM generation asynchronously without awaiting yet
-	let genStart = await StartGenerate(stContext, promptMsg, gSettings.tokenLimit);
+	let genStart = await StartGenerate(stContext, promptMsg, ilsSettings.tokenLimit);
 
 	summaryMsg[kExtraDataKey][kMessageEstimatedTokenCountKey] = await Promise.all(originalMessages.map(item => stContext.getTokenCountAsync(item.mes)));
 
@@ -513,19 +517,19 @@ async function RegenerateSummary(msgIndex)
 	// Now await for the LLM response to complete
 	let genResponse = await FinishGenerate(stContext, genStart);
 
-	await PopulateSummaryMessage(stContext, summaryMsg, genResponse.mainMsg, genResponse.reasoning);
+	await PopulateSummaryMessage(stContext, summaryMsg, genResponse.mainMsg, genResponse.reasoning, ilsSettings);
 
 	await stContext.eventSource.emit("ILS_SummaryAdded", { msgIndex: msgIndex, originalMessages: originalMessages, isManual: false, isRegenerate: true });
 
 	// Save and reload to reflect the final response in the UI
 	await SaveAndReloadChat(stContext, "Failed to Save and Reload chat. New Summary could not be saved. Refreshing the page is recommended.");
 
-	await SwapBackFromSummaryProfile(stContext, profileSwap);
+	await SwapBackFromSummaryProfile(stContext, profileSwap, ilsSettings);
 
 	stContext.activateSendButtons();
 	ilsInstance.operationLock = false;
 
-	BringIntoView(msgIndex);
+	BringIntoView(msgIndex, ilsSettings);
 }
 
 // =========================
@@ -650,8 +654,60 @@ const kMsgActionButtons = [
 		{
 			const stContext = SillyTavern.getContext();
 			const selection = GetSelection(stContext);
-			const valid = selection.start !== null && selection.end !== null && selection.end > selection.start;
+			const valid = selection.start !== null && selection.end !== null && selection.end >= selection.start;
 			return valid ? kMsgBtnColours.selected : kMsgBtnColours.default;
+		}
+	},
+	// Summarise Selected Range - Alternative 1
+	{
+		className: "ils_msg_btn_summarise_alt1",
+		icon: "fa-robot",
+		title: "Summarise (AI, Alternative 1)",
+
+		ShowCondition(msgIndex)
+		{
+			const stContext = SillyTavern.getContext();
+			const selection = GetSelection(stContext);
+			return IsAlternativeSettingsUsed(1) && IsMsgInRange(msgIndex, selection);
+		},
+
+		async OnClick(msgIndex)
+		{
+			await GenerateSummaryAI(GetCurrentSettings(1));
+		},
+
+		GetColor(msgIndex)
+		{
+			const stContext = SillyTavern.getContext();
+			const selection = GetSelection(stContext);
+			const valid = selection.start !== null && selection.end !== null && selection.end >= selection.start;
+			return valid ? kMsgBtnColours.alt1 : kMsgBtnColours.default;
+		}
+	},
+	// Summarise Selected Range - Alternative 2
+	{
+		className: "ils_msg_btn_summarise_alt2",
+		icon: "fa-robot",
+		title: "Summarise (AI, Alternative 2)",
+
+		ShowCondition(msgIndex)
+		{
+			const stContext = SillyTavern.getContext();
+			const selection = GetSelection(stContext);
+			return IsAlternativeSettingsUsed(2) && IsMsgInRange(msgIndex, selection);
+		},
+
+		async OnClick(msgIndex)
+		{
+			await GenerateSummaryAI(GetCurrentSettings(2));
+		},
+
+		GetColor(msgIndex)
+		{
+			const stContext = SillyTavern.getContext();
+			const selection = GetSelection(stContext);
+			const valid = selection.start !== null && selection.end !== null && selection.end >= selection.start;
+			return valid ? kMsgBtnColours.alt2 : kMsgBtnColours.default;
 		}
 	},
 	// Summarise Selected Range - Manual
@@ -676,7 +732,7 @@ const kMsgActionButtons = [
 		{
 			const stContext = SillyTavern.getContext();
 			const selection = GetSelection(stContext);
-			const valid = selection.start !== null && selection.end !== null && selection.end > selection.start;
+			const valid = selection.start !== null && selection.end !== null && selection.end >= selection.start;
 			return valid ? kMsgBtnColours.selected : kMsgBtnColours.default;
 		}
 	},
@@ -699,6 +755,7 @@ const kHeaderButtons = [
 				return;
 
 			const stContext = SillyTavern.getContext();
+			const ilsSettings = GetCurrentSettings();
 
 			ilsInstance.operationLock = true;
 			stContext.deactivateSendButtons();
@@ -727,7 +784,7 @@ const kHeaderButtons = [
 			stContext.activateSendButtons();
 			ilsInstance.operationLock = false;
 
-			BringIntoView(msgIndex);
+			BringIntoView(msgIndex, ilsSettings);
 		}
 	},
 	// Regenerate
@@ -739,6 +796,38 @@ const kHeaderButtons = [
 		async OnClick(msgIndex)
 		{
 			await RegenerateSummary(msgIndex);
+		}
+	},
+	// Regenerate Summary - Alternative 1
+	{
+		className: "ils_hdr_btn_regenerate_alt1",
+		icon: "fa-robot",
+		title: "Re-Summarise (AI, Alt 1)",
+
+		ShowCondition()
+		{
+			return IsAlternativeSettingsUsed(1);
+		},
+
+		async OnClick(msgIndex)
+		{
+			await RegenerateSummary(msgIndex, GetCurrentSettings(1));
+		}
+	},
+	// Regenerate Summary - Alternative 2
+	{
+		className: "ils_hdr_btn_regenerate_alt2",
+		icon: "fa-robot",
+		title: "Re-Summarise (AI, Alt 2)",
+
+		ShowCondition()
+		{
+			return IsAlternativeSettingsUsed(2);
+		},
+
+		async OnClick(msgIndex)
+		{
+			await RegenerateSummary(msgIndex, GetCurrentSettings(2));
 		}
 	},
 ];
@@ -772,6 +861,13 @@ function RefreshMessageElements(messageDiv, msgIndex)
 			msgButton.style.display = (def.ShowCondition && !def.ShowCondition(msgIndex)) ? "none" : null;
 			msgButton.style.color = def.GetColor ? def.GetColor(msgIndex) : kMsgBtnColours.default;
 		}
+	});
+
+	messageDiv.querySelectorAll(".ils_msg_container_header .mes_button").forEach(button =>
+	{
+		const headerButton = kHeaderButtons.find(def => button.classList.contains(def.className));
+		if (headerButton?.ShowCondition)
+			button.style.display = headerButton.ShowCondition(msgIndex) ? null : "none";
 	});
 
 	const existingOrigMsgDiv = messageDiv.querySelector(".ils_original_messages_root");
@@ -888,6 +984,8 @@ function CreateOriginalMessagesContainer(msgIndex, msgObject, depth = 0, path = 
 			btn.setAttribute("mesid", msgIndex);
 			btn.title = def.title;
 			btn.tabIndex = 0;
+			if (def.ShowCondition && !def.ShowCondition(msgIndex))
+				btn.style.display = "none";
 
 			buttonsDiv.appendChild(btn);
 		});
@@ -1158,11 +1256,12 @@ function MainClickHandler(e)
 async function OnChatChanged(data)
 {
 	const stContext = SillyTavern.getContext();
+	const ilsSettings = GetCurrentSettings();
 
 	ClearSelection(stContext);
 
 	// Legacy Recovery
-	if (gSettings.doLegacyRecovery)
+	if (ilsSettings.doLegacyRecovery)
 	{
 		let didRecover = false;
 		for (const msg of stContext.chat)
@@ -1414,6 +1513,8 @@ jQuery(async () =>
 	const ilsInstance = GetILSInstance();
 
 	await LoadSettings(stContext);
+	await LoadSettings(stContext, 1);
+	await LoadSettings(stContext, 2);
 
 	// Setup Settings Menu
 	const settingsHtml = await $.get(kSettingsFile);
@@ -1504,6 +1605,8 @@ jQuery(async () =>
 
 	document.removeEventListener("click", MainClickHandler);
 	document.addEventListener("click", MainClickHandler);
+	document.removeEventListener("ils-settings-changed", RefreshAllMessageButtons);
+	document.addEventListener("ils-settings-changed", RefreshAllMessageButtons);
 
 	stContext.SlashCommandParser.addCommandObject(stContext.SlashCommand.fromProps({
 		name: "ils-summarise",
@@ -1530,7 +1633,7 @@ jQuery(async () =>
 		],
 		helpString: `
 		<div>
-			Summarise the specified range of messages using AI. Inclusive range, must be at least 2 mesages long.
+			Summarise the specified range of messages using AI. Inclusive range, must contain at least 1 message.
 		</div>
 		<div>
 			<strong>Examples:</strong>

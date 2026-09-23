@@ -1,5 +1,9 @@
 # Full Changelog
 
+#### v1.2.3
+Added two optional alternative preset slots. Each configured slot adds its own AI Summary and Re-Summarise buttons, allowing summaries to be generated with different extension settings without changing the main preset.<br>
+AI and manual summaries can now be created from a single selected message by selecting the same message as both the start and end.<br>
+
 #### v1.2.2
 Added event hooks for selection, summary creation, and restore actions so other extensions can respond to the summary workflow.
 
